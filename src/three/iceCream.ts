@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { Flavor } from './flavors';
+import type { Flavor, TopperKind } from './flavors';
 import { noise3, stripeTexture, waffleTexture } from './textures';
 import { createTopping, disposeObject } from './toppings';
 
@@ -52,7 +52,7 @@ export class IceCream {
   private bottomMat: THREE.MeshPhysicalMaterial;
   private sprinkles: THREE.InstancedMesh;
   private nuts: THREE.InstancedMesh;
-  private toppers: Record<Flavor['topper'], THREE.Group>;
+  private toppers = {} as Record<TopperKind, THREE.Group>;
 
   constructor(flavor: Flavor) {
     const inner = new THREE.Group();
@@ -175,43 +175,80 @@ export class IceCream {
     inner.add(this.nuts);
 
     /* ---- Toppers (one visible per flavour) ---- */
-    const cherryTop = new THREE.Group();
-    const c = createTopping('cherry');
-    c.scale.setScalar(0.62);
-    c.position.set(-0.05, 2.72, 0.05);
-    c.rotation.z = 0.15;
-    cherryTop.add(c);
+    const makeTopper = (kind: TopperKind): THREE.Group => {
+      const g = new THREE.Group();
+      if (kind === 'cherry') {
+        const c = createTopping('cherry');
+        c.scale.setScalar(0.62);
+        c.position.set(-0.05, 2.72, 0.05);
+        c.rotation.z = 0.15;
+        g.add(c);
+      } else if (kind === 'blueberry') {
+        [
+          [-0.2, 2.5, 0.15, 0.45],
+          [0.18, 2.52, 0.05, 0.42],
+          [0, 2.62, -0.2, 0.4],
+          [0.05, 2.82, 0.02, 0.38],
+        ].forEach(([x, y, z, s]) => {
+          const b = createTopping('blueberry');
+          b.scale.setScalar(s);
+          b.position.set(x, y, z);
+          b.rotation.set(Math.random(), Math.random() * 3, Math.random());
+          g.add(b);
+        });
+      } else if (kind === 'pistachio') {
+        const leafA = createTopping('mint');
+        leafA.scale.setScalar(0.6);
+        leafA.position.set(-0.18, 2.62, 0.05);
+        leafA.rotation.set(-0.3, 0.4, 0.55);
+        const leafB = createTopping('mint');
+        leafB.scale.setScalar(0.5);
+        leafB.position.set(0.15, 2.6, -0.05);
+        leafB.rotation.set(-0.2, -0.6, -0.6);
+        const nut = createTopping('pistachio');
+        nut.scale.setScalar(0.5);
+        nut.position.set(0, 2.55, 0.25);
+        g.add(leafA, leafB, nut);
+      } else if (kind === 'chocolate') {
+        [-0.2, 0.1, 0.32].forEach((x, i) => {
+          const shard = createTopping('chocolate');
+          shard.scale.setScalar(0.5 - i * 0.08);
+          shard.position.set(x, 2.42 + i * 0.16, i === 1 ? -0.2 : 0.12);
+          shard.rotation.set(0.3 + i * 0.2, i * 0.9, 0.4 - i * 0.25);
+          g.add(shard);
+        });
+      } else if (kind === 'kiwi') {
+        const slice = createTopping('kiwi');
+        slice.scale.setScalar(0.85);
+        slice.position.set(-0.12, 2.42, 0.18);
+        slice.rotation.set(-0.9, 0.3, 0.2);
+        const slice2 = createTopping('kiwi');
+        slice2.scale.setScalar(0.68);
+        slice2.position.set(0.26, 2.5, -0.12);
+        slice2.rotation.set(-0.7, -0.5, -0.3);
+        g.add(slice, slice2);
+      } else {
+        const d = createTopping('date');
+        d.scale.setScalar(0.75);
+        d.position.set(-0.05, 2.55, 0.1);
+        d.rotation.set(0.2, 0.4, -0.3);
+        const d2 = createTopping('date');
+        d2.scale.setScalar(0.55);
+        d2.position.set(0.28, 2.42, -0.1);
+        d2.rotation.set(-0.3, 0.9, 0.5);
+        g.add(d, d2);
+      }
+      return g;
+    };
 
-    const berryTop = new THREE.Group();
-    [
-      [-0.2, 2.5, 0.15, 0.45],
-      [0.18, 2.52, 0.05, 0.42],
-      [0, 2.62, -0.2, 0.4],
-      [0.05, 2.82, 0.02, 0.38],
-    ].forEach(([x, y, z, s]) => {
-      const b = createTopping('blueberry');
-      b.scale.setScalar(s);
-      b.position.set(x, y, z);
-      b.rotation.set(Math.random(), Math.random() * 3, Math.random());
-      berryTop.add(b);
-    });
-
-    const pistachioTop = new THREE.Group();
-    const leafA = createTopping('mint');
-    leafA.scale.setScalar(0.6);
-    leafA.position.set(-0.18, 2.62, 0.05);
-    leafA.rotation.set(-0.3, 0.4, 0.55);
-    const leafB = createTopping('mint');
-    leafB.scale.setScalar(0.5);
-    leafB.position.set(0.15, 2.6, -0.05);
-    leafB.rotation.set(-0.2, -0.6, -0.6);
-    const nut = createTopping('pistachio');
-    nut.scale.setScalar(0.5);
-    nut.position.set(0, 2.55, 0.25);
-    pistachioTop.add(leafA, leafB, nut);
-
-    this.toppers = { cherry: cherryTop, blueberries: berryTop, pistachio: pistachioTop };
-    inner.add(cherryTop, berryTop, pistachioTop);
+    (['cherry', 'blueberry', 'pistachio', 'chocolate', 'kiwi', 'date'] as TopperKind[]).forEach(
+      (kind) => {
+        const g = makeTopper(kind);
+        g.visible = false;
+        this.toppers[kind] = g;
+        inner.add(g);
+      }
+    );
 
     this.setFlavor(flavor);
   }

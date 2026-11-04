@@ -211,6 +211,82 @@ function mint(): THREE.Group {
   return wrap(g, -0.03);
 }
 
+function kiwi(): THREE.Group {
+  const g = new THREE.Group();
+  const skin = new THREE.Mesh(
+    new THREE.SphereGeometry(0.42, 40, 28),
+    std({ color: '#8a6a3a', roughness: 0.75 })
+  );
+  skin.scale.set(1, 0.42, 1);
+  g.add(skin);
+
+  const flesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.4, 0.09, 40),
+    phys({ color: '#8ec44f', roughness: 0.55, clearcoat: 0.3 })
+  );
+  flesh.position.y = 0.012;
+  g.add(flesh);
+
+  // pale core + radial seeds
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.14, 0.14, 0.02, 24),
+    std({ color: '#f2f5d8', roughness: 0.7 })
+  );
+  core.position.y = 0.06;
+  g.add(core);
+
+  const seeds = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.022, 6, 6),
+    std({ color: '#2a1d0d', roughness: 0.4 }),
+    22
+  );
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2;
+    const r = 0.2 + (i % 3) * 0.05;
+    m.makeRotationY(a);
+    m.setPosition(Math.cos(a) * r, 0.062, Math.sin(a) * r);
+    seeds.setMatrixAt(i, m);
+  }
+  g.add(seeds);
+  g.rotation.x = 0.35;
+  return wrap(g, -0.12);
+}
+
+function date(): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 40, 28),
+    phys({ color: '#4a2a13', roughness: 0.42, clearcoat: 0.55, clearcoatRoughness: 0.35 })
+  );
+  const pos = body.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const t = (y + 0.4) / 0.8;
+    const pinch = 1 - Math.pow(2 * t - 1, 2) * 0.45;
+    pos.setX(i, pos.getX(i) * pinch);
+    pos.setZ(i, pos.getZ(i) * pinch);
+    pos.setY(i, y * 1.5);
+  }
+  body.geometry.computeVertexNormals();
+  g.add(body);
+
+  // walnut half resting beside it
+  const walnut = new THREE.Group();
+  const shellMat = phys({ color: '#a9764a', roughness: 0.85 });
+  for (let i = 0; i < 7; i++) {
+    const bump = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), shellMat);
+    const a = (i / 7) * Math.PI * 2;
+    bump.position.set(Math.cos(a) * 0.13, Math.sin(a * 1.7) * 0.08, Math.sin(a) * 0.13);
+    walnut.add(bump);
+  }
+  walnut.position.set(0.3, -0.22, 0.22);
+  walnut.scale.setScalar(1.1);
+  g.add(walnut);
+  g.rotation.z = -0.25;
+  return wrap(g, 0);
+}
+
 export function createTopping(kind: ToppingKind): THREE.Group {
   switch (kind) {
     case 'cherry':
@@ -223,6 +299,10 @@ export function createTopping(kind: ToppingKind): THREE.Group {
       return chocolate();
     case 'pistachio':
       return pistachio();
+    case 'kiwi':
+      return kiwi();
+    case 'date':
+      return date();
     case 'mint':
     default:
       return mint();

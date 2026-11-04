@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { FLAVORS, type Flavor } from './flavors';
+import { FLAVORS, type Flavor, type ToppingKind } from './flavors';
 import { IceCream } from './iceCream';
 import { createTopping, disposeObject } from './toppings';
+
+// On slower devices the animation must finish in real time, not GSAP's capped frame time.
+gsap.ticker.lagSmoothing(0);
 
 type Layer = 'front' | 'back' | 'leaf';
 interface Anchor {
@@ -39,24 +42,44 @@ interface Stage {
 }
 
 /* Same anchors as the original b1..b9 / l1..l4 */
+/* تاپینگ‌ها کوچک‌تر و در لبه‌ها تا روی کارت‌ها و تیتر نیفتند */
 const FRONT: Anchor[] = [
-  { top: 25, left: 30, size: 220 },
-  { top: 60, left: 42, size: 100 },
-  { top: 30, left: 62, size: 250 },
-  { top: 15, left: 48, size: 140 },
-  { top: 75, left: 20, size: 120 },
-  { top: 45, left: 75, size: 180 },
+  { top: 14, left: 18, size: 92 },
+  { top: 70, left: 12, size: 64 },
+  { top: 16, left: 68, size: 100 },
+  { top: 6, left: 44, size: 72 },
+  { top: 78, left: 28, size: 60 },
+  { top: 58, left: 78, size: 78 },
 ];
 const BACK: Anchor[] = [
-  { top: 15, left: 40, size: 80, opacity: 0.7 },
-  { top: 50, left: 55, size: 70, opacity: 0.6 },
-  { top: 80, left: 35, size: 75, opacity: 0.7 },
+  { top: 10, left: 36, size: 44, opacity: 0.5 },
+  { top: 48, left: 54, size: 38, opacity: 0.4 },
+  { top: 84, left: 40, size: 42, opacity: 0.45 },
 ];
 const LEAVES: Anchor[] = [
-  { top: 10, left: 15, size: 60 },
-  { top: 40, left: 80, size: 140, opacity: 0.4 },
-  { top: 70, left: 75, size: 80 },
-  { top: 85, left: 20, size: 120, opacity: 0.3 },
+  { top: 6, left: 8, size: 42 },
+  { top: 36, left: 88, size: 58, opacity: 0.32 },
+  { top: 74, left: 84, size: 46 },
+  { top: 88, left: 10, size: 52, opacity: 0.26 },
+];
+const MOBILE_FRONT: Anchor[] = [
+  { top: 10, left: 3, size: 68 },
+  { top: 59, left: 1, size: 58 },
+  { top: 9, left: 76, size: 72 },
+  { top: 43, left: 84, size: 53 },
+  { top: 75, left: 67, size: 55 },
+  { top: 68, left: 14, size: 56 },
+];
+const MOBILE_BACK: Anchor[] = [
+  { top: 29, left: 20, size: 42, opacity: 0.55 },
+  { top: 49, left: 66, size: 40, opacity: 0.45 },
+  { top: 82, left: 42, size: 38, opacity: 0.45 },
+];
+const MOBILE_LEAVES: Anchor[] = [
+  { top: 3, left: 19, size: 42 },
+  { top: 28, left: 89, size: 44, opacity: 0.4 },
+  { top: 76, left: 81, size: 37 },
+  { top: 73, left: 5, size: 37, opacity: 0.4 },
 ];
 const FLOAT_DURS = [5, 7, 6, 8, 5.5, 6.5, 9, 11, 10];
 const CAM_Z = 16;
@@ -71,7 +94,7 @@ function makeStage(canvas: HTMLCanvasElement | null, maxDpr: number, f: Flavor):
     powerPreference: 'high-performance',
     preserveDrawingBuffer: !canvas,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 900 ? 1 : maxDpr));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 0.95;
@@ -113,22 +136,35 @@ export class Engine {
   private H = 1;
   private wpp = 0.01;
   private mobile = false;
+  private iceY = 0;
+  private iceX = 0;
+  private stageBounds = { left: 0, top: 0, width: 1, height: 1 };
+  private resizeObserver: ResizeObserver | null = null;
   private raf = 0;
+  private running = true;
   private heroCanvas: HTMLCanvasElement;
+  private stageElement: HTMLElement;
+  onSwitchComplete?: () => void;
   isSwitching = false;
   flavorIndex: number;
 
   constructor(
-    canvases: { back: HTMLCanvasElement; hero: HTMLCanvasElement; front: HTMLCanvasElement },
+    canvases: {
+      back: HTMLCanvasElement;
+      hero: HTMLCanvasElement;
+      front: HTMLCanvasElement;
+      stage: HTMLElement;
+    },
     flavorIndex = 0
   ) {
     this.flavorIndex = flavorIndex;
     const f = FLAVORS[flavorIndex];
     this.heroCanvas = canvases.hero;
+    this.stageElement = canvases.stage;
     this.stages = {
-      back: makeStage(canvases.back, 1.5, f),
-      hero: makeStage(canvases.hero, 2, f),
-      front: makeStage(canvases.front, 1.5, f),
+      back: makeStage(canvases.back, 1.25, f),
+      hero: makeStage(canvases.hero, 1.6, f),
+      front: makeStage(canvases.front, 1.25, f),
     };
 
     this.ice = new IceCream(f);
@@ -143,6 +179,9 @@ export class Engine {
 
     this.camera.position.set(0, 0, CAM_Z);
     this.resize();
+    this.resizeObserver = new ResizeObserver(this.resize);
+    if (this.heroCanvas.parentElement) this.resizeObserver.observe(this.heroCanvas.parentElement);
+    this.resizeObserver.observe(this.stageElement);
     window.addEventListener('resize', this.resize);
     window.addEventListener('pointermove', this.onPointer);
     window.addEventListener('touchmove', this.onTouch, { passive: true });
@@ -203,46 +242,92 @@ export class Engine {
 
   /* ---------------- input / resize ---------------- */
   private onPointer = (e: PointerEvent) => {
-    this.mouse.x = e.clientX / window.innerWidth - 0.5;
-    this.mouse.y = e.clientY / window.innerHeight - 0.5;
-    this.mouse.px = e.clientX;
-    this.mouse.py = e.clientY;
+    const rect = this.heroCanvas.getBoundingClientRect();
+    this.mouse.px = e.clientX - rect.left;
+    this.mouse.py = e.clientY - rect.top;
+    this.mouse.x = Math.max(-0.5, Math.min(0.5, this.mouse.px / this.W - 0.5));
+    this.mouse.y = Math.max(-0.5, Math.min(0.5, this.mouse.py / this.H - 0.5));
   };
 
   private onTouch = (e: TouchEvent) => {
     const t = e.touches[0];
     if (!t) return;
-    this.mouse.x = t.clientX / window.innerWidth - 0.5;
-    this.mouse.y = t.clientY / window.innerHeight - 0.5;
-    this.mouse.px = t.clientX;
-    this.mouse.py = t.clientY;
+    const rect = this.heroCanvas.getBoundingClientRect();
+    this.mouse.px = t.clientX - rect.left;
+    this.mouse.py = t.clientY - rect.top;
+    this.mouse.x = Math.max(-0.5, Math.min(0.5, this.mouse.px / this.W - 0.5));
+    this.mouse.y = Math.max(-0.5, Math.min(0.5, this.mouse.py / this.H - 0.5));
   };
 
   private resize = () => {
-    this.W = window.innerWidth;
-    this.H = window.innerHeight;
-    this.mobile = this.W < 900;
+    const box = this.heroCanvas.parentElement;
+    this.W = box?.clientWidth || window.innerWidth;
+    this.H = box?.clientHeight || window.innerHeight;
+    this.mobile = window.innerWidth < 900;
+    const boxRect = box?.getBoundingClientRect();
+    const stageRect = this.stageElement.getBoundingClientRect();
+    this.stageBounds = {
+      left: stageRect.left - (boxRect?.left ?? 0),
+      top: stageRect.top - (boxRect?.top ?? 0),
+      width: stageRect.width,
+      height: stageRect.height,
+    };
     this.camera.aspect = this.W / this.H;
     this.camera.updateProjectionMatrix();
     const visibleH = 2 * Math.tan(deg(FOV / 2)) * CAM_Z;
     this.wpp = visibleH / this.H;
-    Object.values(this.stages).forEach((s) => s.renderer.setSize(this.W, this.H));
-    const s = this.mobile ? Math.min(0.66, (visibleH * this.camera.aspect) / 3.6) : 1;
+    Object.values(this.stages).forEach((s) => {
+      s.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobile ? 1 : s === this.stages.hero ? 1.6 : 1.25));
+      s.renderer.setSize(this.W, this.H);
+    });
+    // Fit the cone to its own layout slot, rather than to the full viewport.
+    const desired = this.mobile ? 0.65 : this.W >= 1400 ? 1.4 : this.W >= 1100 ? 1.3 : 1.16;
+    // A tall cone needs more breathing room than the soda can reference.
+    const fitHeight = (this.stageBounds.height * (this.mobile ? 0.88 : 0.77) * this.wpp) / 5.7;
+    const fitWidth = (this.stageBounds.width * 0.96 * this.wpp) / 2.6;
+    const s = Math.max(0.28, Math.min(desired, fitHeight, fitWidth));
     this.tilt.scale.setScalar(s);
+    this.iceX = (this.stageBounds.left + this.stageBounds.width / 2 - this.W / 2) * this.wpp;
+    this.iceY = (this.H / 2 - this.stageBounds.top - this.stageBounds.height / 2) * this.wpp;
+
+    if (box) {
+      box.style.setProperty('--stage-clip-top', `${Math.max(0, this.stageBounds.top)}px`);
+      box.style.setProperty(
+        '--stage-clip-bottom',
+        `${Math.max(0, this.H - this.stageBounds.top - this.stageBounds.height)}px`
+      );
+    }
   };
 
   private sizeOf(a: Anchor) {
-    return a.size * (this.mobile ? 0.42 : 1);
+    return a.size * (this.mobile ? 1 : 0.86);
   }
 
-  private anchorCenter(a: Anchor) {
+  private anchorCenter(item: Item) {
+    const a = this.mobile
+      ? item.layer === 'front'
+        ? MOBILE_FRONT[item.index]
+        : item.layer === 'back'
+          ? MOBILE_BACK[item.index - FRONT.length]
+          : MOBILE_LEAVES[item.index]
+      : item.anchor;
     const s = this.sizeOf(a);
-    return { x: (a.left / 100) * this.W + s / 2, y: (a.top / 100) * this.H + s / 2, s };
+    const area = this.mobile ? this.stageBounds : { left: 0, top: 0, width: this.W, height: this.H };
+    return {
+      x: area.left + (a.left / 100) * area.width + s / 2,
+      y: area.top + (a.top / 100) * area.height + s / 2,
+      s,
+    };
   }
 
   /* ---------------- main loop ---------------- */
+  setRunning(v: boolean) {
+    this.running = v;
+  }
+
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
+    if (!this.running || document.hidden) return;
     const time = performance.now() * 0.001;
     const { cur, mouse } = this;
 
@@ -253,12 +338,15 @@ export class Engine {
     this.ice.group.rotation.y = deg(cur.x * 40 + this.switchSpin);
     this.ice.group.rotation.x = deg(cur.y * 20);
     this.tilt.rotation.z = deg(-12);
-    this.tilt.position.y = Math.sin((time * Math.PI * 2) / 6) * 20 * this.wpp;
+    this.tilt.position.x = this.iceX;
+    this.tilt.position.y = this.iceY + Math.sin((time * Math.PI * 2) / 6) * 16 * this.wpp;
 
-    const parallax: Record<Layer, number> = { front: 60, back: -30, leaf: -15 };
+    const parallax: Record<Layer, number> = this.mobile
+      ? { front: 18, back: -12, leaf: -8 }
+      : { front: 60, back: -30, leaf: -15 };
 
     for (const item of this.items) {
-      const { x: ax, y: ay, s } = this.anchorCenter(item.anchor);
+      const { x: ax, y: ay, s } = this.anchorCenter(item);
       const plx = cur.x * parallax[item.layer];
       const ply = cur.y * parallax[item.layer];
       let ox = 0;
@@ -279,7 +367,7 @@ export class Engine {
         const i = item.index;
         const dur = FLOAT_DURS[i % 9];
         const phase = (time + i * 0.7) * ((Math.PI * 2) / dur);
-        const floatY = Math.sin(phase) * 15;
+        const floatY = Math.sin(phase) * (this.mobile ? 7 : 15);
         const floatAngle = Math.cos(phase) * 6;
 
         const bx = ax + plx + item.rx + item.baseX;
@@ -290,10 +378,11 @@ export class Engine {
         let tRx = 0;
         let tRy = 0;
         let speedMult = 1;
-        if (dist < 400) {
-          const force = (400 - dist) / 400;
-          tRx = (dx / dist) * force * -80;
-          tRy = (dy / dist) * force * -80;
+        const radius = this.mobile ? 170 : 400;
+        if (dist < radius) {
+          const force = (radius - dist) / radius;
+          tRx = (dx / dist) * force * (this.mobile ? -26 : -80);
+          tRy = (dy / dist) * force * (this.mobile ? -26 : -80);
           speedMult = 1 + force * 5;
         }
         item.rx += (tRx - item.rx) * 0.1;
@@ -318,7 +407,7 @@ export class Engine {
         0
       );
       item.holder.rotation.z = -deg(rot);
-      item.holder.scale.setScalar(Math.max(0.0001, s * this.wpp * 0.82 * scale));
+      item.holder.scale.setScalar(Math.max(0.0001, s * this.wpp * (this.mobile ? 0.62 : 0.68) * scale));
       this.applyOpacity(item, opacity);
     }
 
@@ -332,8 +421,17 @@ export class Engine {
   switchFlavor(next: number): boolean {
     if (this.isSwitching || next === this.flavorIndex) return false;
     this.isSwitching = true;
+    this.heroCanvas.dataset.transitioning = 'true';
     this.flavorIndex = next;
     const f = FLAVORS[next];
+    let spinComplete = false;
+    let toppingsComplete = false;
+    const finish = () => {
+      if (!spinComplete || !toppingsComplete) return;
+      this.isSwitching = false;
+      this.heroCanvas.dataset.transitioning = 'false';
+      this.onSwitchComplete?.();
+    };
 
     // 1. Ice cream spin 0→360 (blur up) → swap at peak → 360→720 (blur down)
     const spin = { val: 0, blur: 0 };
@@ -361,6 +459,8 @@ export class Engine {
           onComplete: () => {
             this.switchSpin = 0;
             this.heroCanvas.style.filter = 'none';
+            spinComplete = true;
+            finish();
           },
         });
       },
@@ -370,12 +470,13 @@ export class Engine {
     const movers = this.items.filter((it) => it.layer !== 'leaf');
     let done = 0;
     movers.forEach((item) => {
-      const { x: ax, y: ay } = this.anchorCenter(item.anchor);
-      const centerX = this.W / 2 - ax;
-      const centerY = this.H / 2 - ay;
+      const { x: ax, y: ay } = this.anchorCenter(item);
+      const centerX = this.stageBounds.left + this.stageBounds.width / 2 - ax;
+      const centerY = this.stageBounds.top + this.stageBounds.height / 2 - ay;
       const startAngle = item.angle;
-      const nextBaseX = (Math.random() - 0.5) * 200;
-      const nextBaseY = (Math.random() - 0.5) * 200;
+      const scatter = this.mobile ? 36 : 160;
+      const nextBaseX = (Math.random() - 0.5) * scatter;
+      const nextBaseY = (Math.random() - 0.5) * scatter;
 
       Object.assign(item.anim, { x: item.baseX, y: item.baseY, rotation: startAngle, scale: 1, opacity: 1 });
 
@@ -407,11 +508,50 @@ export class Engine {
             item.rx = 0;
             item.ry = 0;
             done++;
-            if (done === movers.length) this.isSwitching = false;
+            if (done === movers.length) {
+              toppingsComplete = true;
+              finish();
+            }
           },
         });
     });
     return true;
+  }
+
+  /** عکس شفاف هر تاپینگ برای بخش «مواد اولیه» */
+  static renderToppingThumbnails(): Record<string, string> {
+    const size = 200;
+    const kinds: ToppingKind[] = [
+      'cherry',
+      'strawberry',
+      'blueberry',
+      'chocolate',
+      'pistachio',
+      'mint',
+      'kiwi',
+      'date',
+    ];
+    const stage = makeStage(null, 1, FLAVORS[0]);
+    stage.renderer.setSize(size, size, false);
+    const cam = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
+    cam.position.set(0, 0, 7.5);
+    const holder = new THREE.Group();
+    stage.scene.add(holder);
+    const out: Record<string, string> = {};
+    kinds.forEach((kind) => {
+      const model = createTopping(kind);
+      model.rotation.set(0.35, 0.7, 0.1);
+      holder.add(model);
+      holder.scale.setScalar(2.05);
+      stage.renderer.render(stage.scene, cam);
+      out[kind] = stage.renderer.domElement.toDataURL('image/png');
+      holder.remove(model);
+      disposeObject(model);
+    });
+    stage.pmrem.dispose();
+    stage.renderer.dispose();
+    stage.renderer.forceContextLoss();
+    return out;
   }
 
   /* ---------------- transparent card thumbnails ---------------- */
@@ -445,6 +585,8 @@ export class Engine {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.onSwitchComplete = undefined;
+    this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this.resize);
     window.removeEventListener('pointermove', this.onPointer);
     window.removeEventListener('touchmove', this.onTouch);
